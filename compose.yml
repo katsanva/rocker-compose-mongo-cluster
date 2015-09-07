@@ -1,0 +1,48 @@
+{{ with $namespace := "cluster" }}
+namespace: {{$namespace}}
+containers:
+{{ range $i := seq 3 }}
+  node_rs{{$i}}_srv1:
+    image: mongo:3.1
+    cmd: ["--replSet", "rs{{$i}}", "--noprealloc", "--smallfiles"]
+    hostname: {{$namespace}}-node_rs{{$i}}_srv1
+  node_rs{{$i}}_srv2:
+    image: mongo:3.1
+    cmd: ["--replSet", "rs{{$i}}", "--noprealloc", "--smallfiles"]
+    hostname: {{$namespace}}-node_rs{{$i}}_srv2
+  node_rs{{$i}}_srv3:
+    image: mongo:3.1
+    cmd: ["--replSet", "rs{{$i}}", "--noprealloc", "--smallfiles"]
+    link: [node_rs{{$i}}_srv1, node_rs{{$i}}_srv2]
+    hostname: {{$namespace}}-node_rs{{$i}}_srv3
+  config_rs{{$i}}:
+    image: mongo:3.1
+    cmd: ["--dbpath", "/data/db", "--configsvr", "--port", "27017", "--noprealloc", "--smallfiles"]
+    hostname: {{$namespace}}-config_rs{{$i}}
+{{ end }}
+  router:
+    image: mongo:3.1
+    link:
+      {{ range $i := seq 3 }}
+      - config_rs{{$i}}
+      {{end}}
+    cmd: ["mongos", "--port", "27017", "--configdb", "{{$namespace}}-config_rs1:27017,{{$namespace}}-config_rs2:27017,{{$namespace}}-config_rs3:27017"]
+    ports: "27017:27017"
+  init:
+    image: mongo:3.1
+    link:
+      {{ range $i := seq 3 }}
+      {{ range $j := seq 3 }}
+      - node_rs{{$i}}_srv{{$j}}
+      {{ end }}
+      {{ end }}
+      - router
+    state: ran
+    cmd: "{{ range $i := seq 3 }} mongo \
+       --host {{$namespace}}-node_rs{{$i}}_srv3 \
+       --eval 'rs.initiate();rs.add(\"{{$namespace}}-node_rs{{$i}}_srv1:27017\");rs.add(\"{{$namespace}}-node_rs{{$i}}_srv2:27017\");' && \
+      {{ end }}
+      mongo \
+      --host {{$namespace}}-router \
+      --eval '{{ range $i := seq 3 }}sh.addShard(\"rs{{$i}}/{{$namespace}}-node_rs{{$i}}_srv3:27017\");{{end}}'"
+{{ end }}
